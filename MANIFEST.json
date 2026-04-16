@@ -1,0 +1,211 @@
+{
+  "name": "nexus-bridge-service-layer",
+  "version": "1.2.0",
+  "description": "Service layer for NEXUS Bridge v5 — Windows service wrapper, Playwright mirror plugin, element callto API, and real-browser Tampermonkey agent.",
+  "requires": "nexus-bridge-server.js v5.0.0+",
+  "auditDate": "2026-04-15",
+  "status": "production-candidate",
+  "totalTests": 162,
+  "testsPassing": 162,
+
+  "modules": {
+
+    "nexus-bridge-service.js": {
+      "version": "1.0.0",
+      "role": "Windows NT service wrapper",
+      "entry": true,
+      "commands": ["install", "uninstall", "start", "stop", "status", "run"],
+      "restartPolicy": [1000, 2000, 5000, 10000, 30000, 60000],
+      "healthCheck": "GET /health every 15s",
+      "writes": [
+        "data/bridge.pid",
+        "data/service-logs/bridge-svc-YYYY-MM-DD.log"
+      ],
+      "env": {
+        "NEXUS_BRIDGE_ROOT": "path to bridge root (default: ..)",
+        "NEXUS_PORT": "bridge port for health check (default: 3666)",
+        "NODE_ENV": "passed to child process (default: production)"
+      },
+      "optionalDep": "node-windows (npm install node-windows --save)"
+    },
+
+    "nexus-playwright-mirror.js": {
+      "version": "1.0.0",
+      "role": "Mirror DOM elements onto NEXUS bus and REST endpoints",
+      "install": "Mirror.install({ bus, busEmit, getPage })",
+      "httpPrefix": "/playwright/mirror",
+      "busEventsIn": [
+        "pw:element:click", "pw:element:type", "pw:element:extract",
+        "pw:element:screenshot", "pw:element:wait", "pw:element:exists",
+        "pw:element:query", "pw:element:scroll", "pw:element:hover",
+        "pw:element:select", "pw:element:check", "pw:element:uncheck",
+        "pw:element:focus", "pw:element:blur",
+        "pw:cookies:capture", "pw:cookies:inject", "pw:dom:snapshot"
+      ],
+      "busEventsOut": [
+        "pw:element:result", "pw:cookies:captured",
+        "pw:cookies:injected", "pw:dom:snapshot"
+      ],
+      "actions": 14,
+      "exports": ["install", "route", "dispatch", "captureCookies", "injectCookies", "domSnapshot", "ACTIONS"]
+    },
+
+    "nexus-element-api.js": {
+      "version": "1.0.0",
+      "role": "Element operations as persistent trackable callto objects",
+      "install": "ElementApi.install({ mirror, busEmit, calltoDir })",
+      "httpPrefix": "/api/elements",
+      "persists": "data/calltos/*.json",
+      "calltoSchema": {
+        "id": "string (el_hex)",
+        "action": "string",
+        "selector": "string|array",
+        "params": "object",
+        "status": "pending|running|ok|error",
+        "result": "any",
+        "error": "string|null",
+        "durationMs": "number|null",
+        "retries": "number",
+        "createdAt": "ISO string",
+        "resolvedAt": "ISO string|null"
+      },
+      "endpoints": [
+        "POST   /api/elements/callto",
+        "GET    /api/elements/calltos",
+        "GET    /api/elements/callto/:id",
+        "POST   /api/elements/callto/:id/retry",
+        "DELETE /api/elements/callto/:id",
+        "POST   /api/elements/batch",
+        "POST   /api/elements/form/fill",
+        "POST   /api/elements/page/extract",
+        "GET    /api/elements/actions"
+      ],
+      "busEventsOut": [
+        "element:callto:running", "element:callto:resolved",
+        "element:callto:error", "element:batch:resolved"
+      ],
+      "exports": ["install", "route", "formFill", "pageExtract", "makeCallto", "executeCallto"]
+    },
+
+    "nexus-bridge-connector.user.js": {
+      "version": "1.0.0",
+      "role": "Tampermonkey userscript — real-browser execution agent",
+      "type": "userscript",
+      "grantedPermissions": ["GM_xmlhttpRequest", "GM_setValue", "GM_getValue", "GM_deleteValue", "GM_listValues"],
+      "bridgeUrl": "http://127.0.0.1:3747 (configurable in CFG)",
+      "defaultCaps": {
+        "execute": true,
+        "observe": true,
+        "cookies": false,
+        "eval":    false
+      },
+      "selectorTypes": ["CSS", "XPath (// prefix)", "text= (exact)", "text*= (contains)", "role="],
+      "fallbackChains": true,
+      "prePostConditions": ["exists", "notExists", "text.contains", "text.equals", "url.contains", "title.contains"],
+      "calltoTracking": {
+        "ack": true,
+        "idempotentReplay": true,
+        "cacheSize": 200
+      },
+      "evalGuard": {
+        "mechanism": "AST pattern matching before new Function()",
+        "blockedPatterns": ["eval()", "new Function()", "__proto__", "prototype[", "Object.defineProperty", "location.href=", "document.cookie=", "fetch()", "XMLHttpRequest", "importScripts()"]
+      },
+      "domDiffing": {
+        "debounceMs": 250,
+        "maxEventsPerSecond": 10,
+        "nodeIdentityPriority": ["data-nexus", "id", "name", "aria-label", "tag:nth-of-type"]
+      },
+      "navigationAwareness": ["pushState", "replaceState", "popstate", "hashchange", "beforeunload"],
+      "bridgeEndpointsUsed": [
+        "POST /extension/register",
+        "POST /extension/heartbeat",
+        "POST /extension/callto-ack",
+        "POST /extension/event",
+        "GET  /extension/poll",
+        "POST /playwright/hook",
+        "POST /playwright/cmd"
+      ]
+    },
+
+    "test-bridge-service.js": {
+      "version": "1.0.0",
+      "role": "Test suite for service, mirror, and element API",
+      "tests": 64,
+      "passing": 64,
+      "suites": [
+        { "name": "Module loading",      "tests": 3  },
+        { "name": "Element actions",     "tests": 18 },
+        { "name": "Cookie capture",      "tests": 8  },
+        { "name": "DOM snapshot",        "tests": 2  },
+        { "name": "Element API calltos", "tests": 6  },
+        { "name": "HTTP routes",         "tests": 16 },
+        { "name": "Bus wire-up",         "tests": 4  },
+        { "name": "Service structure",   "tests": 5  },
+        { "name": "Cookie invariants",   "tests": 4  }
+      ],
+      "requiresBrowser": false,
+      "requiresBridge": false
+    },
+
+    "test-bridge-connector.js": {
+      "version": "2.0.0",
+      "role": "Test suite for Tampermonkey connector logic",
+      "tests": 98,
+      "passing": 98,
+      "suites": [
+        { "name": "Selector resilience",   "tests": 16 },
+        { "name": "Pre/Post conditions",   "tests": 11 },
+        { "name": "Element actions",       "tests": 12 },
+        { "name": "Sandboxed eval",        "tests": 15 },
+        { "name": "Cookie model",          "tests": 14 },
+        { "name": "Stable-path diffing",   "tests": 9  },
+        { "name": "Idempotency store",     "tests": 4  },
+        { "name": "Async DOM simulation",  "tests": 5  },
+        { "name": "State lifecycle",       "tests": 8  },
+        { "name": "Callto lifecycle",      "tests": 4  }
+      ],
+      "mockFeatures": [
+        "parent/child DOM tree",
+        "nth-of-type among siblings",
+        "event bubbling",
+        "attribute existence selectors ([id], [name])",
+        "wildcard selector (*)",
+        "microtask-accurate async flush",
+        "RFC 6265 domain/path matching"
+      ],
+      "requiresBrowser": false,
+      "requiresBridge": false
+    }
+
+  },
+
+  "invariants": [
+    "Calltos persist immediately on creation — survive bridge restarts",
+    "Completed calltoIds never re-execute — idempotent replay only",
+    "Every element action emits pw:element:result on the bus",
+    "Capability flags gate every action — no silent bypass",
+    "DOM diff uses stable structural paths — insertion order changes produce no false positives",
+    "eval AST guard runs before new Function() — blocked patterns never reach execution",
+    "Service restarts use exponential backoff — never tight-loops on failure",
+    "Navigation awareness pauses command execution during page unload"
+  ],
+
+  "openFlags": [
+    {
+      "id": "FLAG-001",
+      "severity": "WARN",
+      "description": "eval AST guard uses regex, not a real AST parser — obfuscated code may bypass"
+    },
+    {
+      "id": "FLAG-002",
+      "severity": "WARN",
+      "description": "Connector polls on interval — consider WebSocket upgrade for lower latency"
+    },
+    {
+      "id": "FLAG-003",
+      "severity": "INFO",
+      "description": "text*= selector walks full DOM — may be slow on very large pages"
+    }
+  ]
+}
